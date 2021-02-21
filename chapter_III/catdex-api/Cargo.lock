@@ -512,6 +512,7 @@ dependencies = [
  "actix-files",
  "actix-web",
  "bson",
+ "futures",
  "mongodb",
  "serde",
  "serde_json",
