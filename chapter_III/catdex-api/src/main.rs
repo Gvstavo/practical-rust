@@ -18,12 +18,32 @@ struct CatEndpointPath {
     id: String,
 }
 
+#[derive(Debug,Serialize, Deserialize)]
+struct FormData {
+    name: String,
+    image: String
+}
+
+
 fn api_config(cfg: &mut web::ServiceConfig) {
     cfg.service(
         web::scope("/api")
            .route("/cats", web::get().to(cats_endpoint))
            .route("/cat/{id}", web::get().to(cat_endpoint))
+           .route("/cat", web::post().to(cat_endpoint_new))
     );
+}
+
+async fn cat_endpoint_new(pool: web::Data<Database>, form: web::Form<FormData>) ->  Result<HttpResponse, UserError>{
+
+  println!("entrando no post");
+
+  let connection = pool;
+
+  println!("{:?}",form);
+
+  Ok(HttpResponse::Ok().finish())
+
 }
 
 async fn cat_endpoint(pool: web::Data<Database>, cat_id: web::Path<CatEndpointPath>) -> Result<HttpResponse, UserError>{
@@ -80,7 +100,7 @@ async fn main() -> std::io::Result<()>{
 		.data(pool.clone())
 		.wrap(Logger::default())
 		.configure(api_config)
-		.service(Files::new("/","static").show_files_listing())
+		.service(Files::new("/","static").index_file("index.html"))
 	})
 	.bind_openssl("127.0.0.1:8080", builder)?
 	.run()
