@@ -5,8 +5,12 @@ use mongodb::{Client, Database, options::FindOptions};
 use futures::stream::{self, StreamExt};
 use bson::oid::ObjectId;
 use bson::doc;
+use actix_web::middleware::Logger;
+use openssl::ssl::{SslAcceptor, SslFiletype, SslMethod};
 
 mod models;
+mod errors;
+use self::errors::UserError;
 use self::models::*;
 
 #[derive(Deserialize)]
@@ -17,23 +21,21 @@ struct CatEndpointPath {
 fn api_config(cfg: &mut web::ServiceConfig) {
     cfg.service(
         web::scope("/api")
-            .route("/cats", web::get().to(cats_endpoint))
-            .route("/cat/{id}", web::get().to(cat_endpoint))
+           .route("/cats", web::get().to(cats_endpoint))
+           .route("/cat/{id}", web::get().to(cat_endpoint))
     );
 }
 
-async fn cat_endpoint(pool: web::Data<Database>, cat_id: web::Path<CatEndpointPath>) -> Result<HttpResponse, Error>{
+async fn cat_endpoint(pool: web::Data<Database>, cat_id: web::Path<CatEndpointPath>) -> Result<HttpResponse, UserError>{
 	let connection = pool;
 
-	let id = ObjectId::with_string(&cat_id.id).unwrap(); 
+	let id = ObjectId::with_string(&cat_id.id).map_err(|_| UserError::ValidationError)?;
 
 	let filter = doc! {"_id": id};
 
-	let cat_data = connection.collection("cats").find_one(filter , None).await.unwrap();
+	let cat_data = connection.collection("cats").find_one(filter , None).await.map_err(|_| UserError::UnexpectedError)?;
 
-	let cat : Cat = bson::de::from_document(cat_data.unwrap()).unwrap();
-
-	println!("{:?}", cat );
+	let cat : Cat = bson::de::from_document(cat_data.ok_or_else(|| UserError::NotFoundError)?).map_err(|_| UserError::UnexpectedError)?;
 
 	Ok(HttpResponse::Ok().json(cat))	
 }
@@ -63,15 +65,24 @@ async fn cats_endpoint(pool: web::Data<Database>) -> Result<HttpResponse, Error>
 
 #[actix_web::main]
 async fn main() -> std::io::Result<()>{
+	env_logger::init();
+	let mut builder = SslAcceptor::mozilla_intermediate(SslMethod::tls()).unwrap();
+   
+  builder.set_private_key_file("key-no-password.pem",SslFiletype::PEM,).unwrap();
+	
+	builder.set_certificate_chain_file("cert.pem").unwrap();
+
+
 	let pool =  Client::with_uri_str("mongodb://localhost:27017/").await.unwrap().database("catdex");
 	println!("Listening on port 8080");
 	HttpServer::new(move ||{
 		App::new()
 		.data(pool.clone())
+		.wrap(Logger::default())
 		.configure(api_config)
 		.service(Files::new("/","static").show_files_listing())
 	})
-	.bind("127.0.0.1:8080")?
+	.bind_openssl("127.0.0.1:8080", builder)?
 	.run()
 	.await
 }
